@@ -148,6 +148,21 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
   <div id="cfg-summary" style="font-size:.82em;color:#777;margin-top:2px">Cargando...</div>
 </div>
 
+<div class="card">
+  <h2>Red de la impresora (eth0)</h2>
+  <div id="net-summary" style="font-size:.82em;color:#777;margin-bottom:8px">Comprobando...</div>
+  <button class="btn b-sm" style="background:#1565C0;color:#fff" onclick="netMode('printer')">
+    🖨️ Activar red impresora (eth0 → 192.168.34.x)
+  </button>
+  <button class="btn b-sm" style="background:none;border:1px solid #ccc;color:#666;margin-top:6px" onclick="netMode('local')">
+    ↩ Volver a red local (DHCP)
+  </button>
+  <div id="net-status" style="font-size:.78em;margin-top:6px;min-height:16px;color:#666"></div>
+  <div style="font-size:.72em;color:#999;margin-top:4px">
+    Solo necesario si conectas la impresora por cable de red (RJ45). Por USB no hace falta.
+  </div>
+</div>
+
 <script>
 var PRODUCTS = [];
 
@@ -200,6 +215,34 @@ function onBackend(){
   document.getElementById('cfg-usb').classList.toggle('hide', b !== 'usb');
   document.getElementById('cfg-escpos').classList.toggle('hide', b !== 'escpos');
   document.getElementById('cfg-serial').classList.toggle('hide', b !== 'serial');
+}
+
+// ── Red de la impresora (eth0) ────────────────────────────────────────────────
+function loadNet(){
+  fetch('/network/status')
+    .then(function(r){return r.json()})
+    .then(function(s){
+      var modo = s.mode === 'printer' ? 'Red impresora' : 'Red local (DHCP)';
+      document.getElementById('net-summary').textContent =
+        modo + ' · eth0: ' + (s.ip || 'sin IP') + ' · conexión: ' + (s.connection || '—');
+    })
+    .catch(function(){document.getElementById('net-summary').textContent = 'No disponible'});
+}
+loadNet();
+
+function netMode(mode){
+  var url = mode === 'printer' ? '/network/printer-mode' : '/network/local-mode';
+  var st = document.getElementById('net-status');
+  st.style.color = '#666';
+  st.textContent = mode === 'printer' ? 'Activando red de la impresora...' : 'Volviendo a red local...';
+  fetch(url, {method:'POST'})
+    .then(function(r){return r.json()})
+    .then(function(r){
+      st.style.color = r.ok ? '#1b5e20' : '#b71c1c';
+      st.textContent = (r.ok ? '✔ ' : '✘ ') + (r.msg || '');
+      loadNet();
+    })
+    .catch(function(){st.style.color='#b71c1c';st.textContent='✘ Error de conexión con el servidor'});
 }
 
 // ── Helpers de fecha ──────────────────────────────────────────────────────────

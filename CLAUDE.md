@@ -38,12 +38,23 @@ Impresora SoL801: 192.168.34.133, gateway 192.168.34.96, puerto ESC/POS 9100.
 Toda la lógica de transporte está en `printer.py`; el ticket ESC/POS se construye una
 sola vez en `build_ticket()` y se envía como bytes crudos por cualquier backend.
 
+## Gestión de red desde la web (eth0)
+
+`netcfg.py` permite poner eth0 en la red de la impresora desde el frontend (seguro
+porque entras por el AP/wlan0, no se corta). Rutas:
+- `GET  /network/status` → IP/conexión/modo de eth0 (printer|local)
+- `POST /network/printer-mode` → eth0 a `eth_ip`/`eth_gateway` (config) + ping a la impresora
+- `POST /network/local-mode` → eth0 de vuelta a DHCP
+El servicio corre como root, así que nmcli se ejecuta sin sudo. Equivale a
+setup-printer-net.sh pero por navegador.
+
 ## Estructura
 
 ```
 /home/n1ce/relay-etiquetas/   ← instalado en la RPi
 ├── app.py            ← Flask, rutas HTTP
 ├── printer.py        ← backend ESC/POS unificado + build_ticket
+├── netcfg.py         ← gestión eth0 (nmcli) desde la web
 ├── products.py       ← presets
 ├── config.json       ← runtime (desde config.example.json)
 ├── static/index.html ← frontend

@@ -134,11 +134,12 @@ El instalador hace todo automáticamente:
 
 **Opción A · Impresora por RED (RJ45):**
 
-```bash
-sudo bash /home/n1ce/relay-etiquetas/setup/setup-printer-net.sh
-```
+Lo más cómodo es hacerlo **desde el navegador** (conectado al AP): en la app, tarjeta
+**"Red de la impresora (eth0)"** → botón **🖨️ Activar red impresora**. Esto pone `eth0`
+en `192.168.34.50/24` y prueba el alcance a la impresora, sin tocar la terminal y **sin
+cortar tu conexión** (vas por el WiFi). El botón **↩ Volver a red local** lo revierte.
 
-Esto pone `eth0` en `192.168.34.50/24` y hace un `ping` de prueba a `192.168.34.133`.
+> Equivale al script `setup/setup-printer-net.sh`, que sigue disponible para uso por CLI.
 
 **Opción B · Impresora por USB:** no hace falta nada de red. Solo elige el backend
 `usb` en el frontend (paso siguiente).
@@ -246,6 +247,7 @@ ssh n1ce@192.168.4.1 "sudo systemctl restart relay-etiquetas"
 EtiquetasCaducidad-rpi/
 ├── app.py                  # Servidor Flask (rutas HTTP)
 ├── printer.py              # Backend ESC/POS unificado (network/usb/serial/escpos) + build_ticket
+├── netcfg.py               # Gestión de eth0 vía nmcli (modo impresora / red local) desde la web
 ├── products.py             # Presets de productos y sus días de caducidad
 ├── config.example.json     # Plantilla de configuración
 ├── requirements.txt        # Dependencias Python
@@ -268,7 +270,10 @@ EtiquetasCaducidad-rpi/
 | `GET`  | `/health` | Estado del servicio (`{"ok": true}`) |
 | `GET`  | `/products` | Lista de presets de productos (JSON) |
 | `GET`  | `/config` | Configuración actual de la impresora |
-| `POST` | `/config` | Guarda configuración (`backend`, `printer_ip`, `printer_port`, `usb_device`, `serial_port`, `serial_baud`...) |
+| `POST` | `/config` | Guarda configuración (`backend`, `printer_ip`, `printer_port`, `usb_device`, `serial_port`, `serial_baud`, `eth_ip`, `eth_gateway`...) |
+| `GET`  | `/network/status` | Estado de `eth0` (IP, conexión, modo `printer`/`local`) |
+| `POST` | `/network/printer-mode` | Pone `eth0` en la red de la impresora (IP estática + ping) |
+| `POST` | `/network/local-mode` | Devuelve `eth0` a DHCP/red local |
 | `POST` | `/print` | Imprime una etiqueta |
 
 **Ejemplo `POST /print`:**

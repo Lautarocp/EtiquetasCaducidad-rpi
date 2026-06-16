@@ -22,6 +22,7 @@ from flask import Flask, request, jsonify, send_from_directory
 
 from printer import print_label, PrintJob
 from products import PRODUCTS
+import netcfg
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +38,8 @@ DEFAULT_CONFIG = {
     'usb_product_id': '0x0000',
     'serial_port':    '/dev/ttyUSB0',     # usado si backend == serial
     'serial_baud':    115200,             # SoL801V: 115200 8N1 RTS/CTS
+    'eth_ip':         '192.168.34.50/24', # IP de la RPi en la red de la impresora (eth0)
+    'eth_gateway':    '192.168.34.96',    # gateway de la red de la impresora
 }
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -100,13 +103,36 @@ def set_config():
             cfg['serial_baud'] = int(data['serial_baud'])
         except (ValueError, TypeError):
             return jsonify({'ok': False, 'msg': 'Baudios inválidos'}), 400
-    for k in ('usb_device', 'usb_vendor_id', 'usb_product_id', 'serial_port'):
+    for k in ('usb_device', 'usb_vendor_id', 'usb_product_id', 'serial_port',
+              'eth_ip', 'eth_gateway'):
         if k in data:
             cfg[k] = str(data[k]).strip()
 
     save_config(cfg)
     app.logger.info('Config guardada: %s', cfg)
     return jsonify({'ok': True, 'config': cfg})
+
+
+@app.get('/network/status')
+def network_status():
+    return jsonify(netcfg.get_eth_status())
+
+
+@app.post('/network/printer-mode')
+def network_printer_mode():
+    """Pone eth0 en la red de la impresora. Seguro desde el AP (no corta wlan0)."""
+    cfg = load_config()
+    result = netcfg.set_printer_mode(cfg['eth_ip'], cfg['eth_gateway'], cfg['printer_ip'])
+    app.logger.info('network/printer-mode → %s', result.get('msg'))
+    return jsonify(result), (200 if result['ok'] else 503)
+
+
+@app.post('/network/local-mode')
+def network_local_mode():
+    """Devuelve eth0 a DHCP/red local."""
+    result = netcfg.set_local_mode()
+    app.logger.info('network/local-mode → %s', result.get('msg'))
+    return jsonify(result), (200 if result['ok'] else 503)
 
 
 @app.post('/print')
