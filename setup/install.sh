@@ -1,112 +1,74 @@
-#!/bin/bash
-# =============================================================================
-#  install.sh — Instala Relay Etiquetas Caducidad en Raspberry Pi 3B (Debian)
-# =============================================================================
-set -e
+#!/usr/bin/env bash
+# ──────────────────────────────────────────────────────────────────────────────
+# Instalador completo en la Raspberry Pi.
+#
+# Pasos:
+#   1. Instala dependencias del sistema
+#   2. Copia el proyecto a /home/n1ce/relay-etiquetas
+#   3. Crea el virtualenv e instala requirements
+#   4. Instala y arranca el servicio systemd
+#   5. (opcional) levanta el AP WiFi
+#
+# Uso (desde el directorio del proyecto subido, p.ej. /tmp/relay-src):
+#   sudo bash setup/install.sh
+# ──────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
 
-PROJECT_SRC="$(cd "$(dirname "$0")/.." && pwd)"
-INSTALL_DIR="/home/n1ce/relay-etiquetas"
-SERVICE="relay-etiquetas"
+APP_USER="n1ce"
+APP_DIR="/home/${APP_USER}/relay-etiquetas"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "=============================================="
-echo "  Relay Etiquetas Caducidad — Instalador"
-echo "=============================================="
-echo "Origen:  $PROJECT_SRC"
-echo "Destino: $INSTALL_DIR"
-echo ""
+echo "================================================================"
+echo " Instalando Relay Etiquetas de Caducidad"
+echo " Origen:  $SRC_DIR"
+echo " Destino: $APP_DIR"
+echo "================================================================"
 
-# ── 1. Dependencias del sistema ───────────────────────────────────────────────
-echo "[1/6] Instalando dependencias del sistema..."
-sudo apt-get update -qq
-sudo apt-get install -y python3 python3-venv python3-pip
+# ── 1. Dependencias del sistema ────────────────────────────────────────────────
+echo ">> [1/5] Instalando dependencias APT ..."
+apt-get update -qq
+apt-get install -y python3 python3-venv python3-pip network-manager
 
-# ── 2. Copiar archivos del proyecto ───────────────────────────────────────────
-echo "[2/6] Copiando archivos a $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR/static"
-cp "$PROJECT_SRC/app.py"           "$INSTALL_DIR/"
-cp "$PROJECT_SRC/escpos_helper.py" "$INSTALL_DIR/"
-cp "$PROJECT_SRC/products.py"      "$INSTALL_DIR/"
-cp "$PROJECT_SRC/requirements.txt" "$INSTALL_DIR/"
-cp "$PROJECT_SRC/static/index.html" "$INSTALL_DIR/static/"
-chown -R n1ce:n1ce "$INSTALL_DIR"
+# ── 2. Copiar proyecto ─────────────────────────────────────────────────────────
+echo ">> [2/5] Copiando proyecto a $APP_DIR ..."
+mkdir -p "$APP_DIR"
+rsync -a --exclude venv --exclude __pycache__ --exclude '*.pyc' \
+  --exclude '.git' "$SRC_DIR"/ "$APP_DIR"/
+chown -R "${APP_USER}:${APP_USER}" "$APP_DIR"
 
-# ── 3. Entorno virtual Python ─────────────────────────────────────────────────
-echo "[3/6] Creando entorno virtual e instalando Flask + gunicorn..."
-sudo -u n1ce python3 -m venv "$INSTALL_DIR/venv"
-sudo -u n1ce "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
-
-# ── 4. Servicio systemd ───────────────────────────────────────────────────────
-echo "[4/6] Configurando servicio systemd..."
-sudo cp "$PROJECT_SRC/setup/relay-etiquetas.service" /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE"
-
-# ── 5. Red: AP WiFi (wlan0) + IP estática eth0 ───────────────────────────────
-echo "[5/6] Configurando red con NetworkManager..."
-
-# Eliminar conexión cliente WiFi actual (si existe) para liberar wlan0
-CURRENT_WLAN=$(nmcli -g NAME,DEVICE con show --active 2>/dev/null | grep ":wlan0" | cut -d: -f1 || true)
-if [ -n "$CURRENT_WLAN" ]; then
-    echo "     Eliminando conexión WiFi cliente: $CURRENT_WLAN"
-    sudo nmcli con delete "$CURRENT_WLAN" 2>/dev/null || true
+# config.json inicial si no existe
+if [ ! -f "$APP_DIR/config.json" ]; then
+  cp "$APP_DIR/config.example.json" "$APP_DIR/config.json"
+  echo "   config.json creado desde el ejemplo"
 fi
 
-# AP WiFi en wlan0: ipv4.method=shared → NM gestiona DHCP automáticamente
-if ! nmcli con show "RelayEtiquetas" &>/dev/null; then
-    sudo nmcli con add \
-        type wifi \
-        ifname wlan0 \
-        con-name "RelayEtiquetas" \
-        ssid "RelayEtiquetas" \
-        mode ap \
-        802-11-wireless.band bg \
-        802-11-wireless.channel 6 \
-        ipv4.method shared \
-        ipv4.addresses "192.168.4.1/24" \
-        connection.autoconnect yes
-    echo "     AP 'RelayEtiquetas' creado — IP: 192.168.4.1"
+# ── 3. Virtualenv ──────────────────────────────────────────────────────────────
+echo ">> [3/5] Creando virtualenv e instalando requirements ..."
+python3 -m venv "$APP_DIR/venv"
+"$APP_DIR/venv/bin/pip" install --upgrade pip -q
+"$APP_DIR/venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
+
+# ── 4. Servicio systemd ────────────────────────────────────────────────────────
+echo ">> [4/5] Instalando servicio systemd ..."
+cp "$APP_DIR/setup/relay-etiquetas.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable relay-etiquetas
+systemctl restart relay-etiquetas
+
+# ── 5. AP WiFi ─────────────────────────────────────────────────────────────────
+echo ">> [5/5] AP WiFi"
+read -rp "   ¿Levantar el AP WiFi 'Realyetiquetas' ahora? [s/N] " ans
+if [[ "${ans,,}" == "s" ]]; then
+  bash "$APP_DIR/setup/setup-ap.sh"
 else
-    echo "     AP 'RelayEtiquetas' ya existe, sin cambios."
+  echo "   Omitido. Ejecuta luego: sudo bash $APP_DIR/setup/setup-ap.sh"
 fi
 
-# IP estática en eth0 para la impresora (conexión directa)
-if ! nmcli con show "printer-link" &>/dev/null; then
-    sudo nmcli con add \
-        type ethernet \
-        ifname eth0 \
-        con-name "printer-link" \
-        ipv4.method manual \
-        ipv4.addresses "192.168.168.1/24" \
-        connection.autoconnect yes
-    echo "     eth0 configurado: 192.168.168.1/24"
-else
-    echo "     Conexión printer-link ya existe, sin cambios."
-fi
-
-# ── 6. Resumen ────────────────────────────────────────────────────────────────
-echo ""
-echo "[6/6] ¡Instalación completada!"
-echo ""
-echo "  ┌─────────────────────────────────────────────┐"
-echo "  │  PRÓXIMOS PASOS                             │"
-echo "  │                                             │"
-echo "  │  1. Conectar la impresora al puerto eth0    │"
-echo "  │     y configurar en ella la IP:             │"
-echo "  │       192.168.168.100                       │"
-echo "  │                                             │"
-echo "  │  2. Reiniciar la Raspberry Pi:              │"
-echo "  │       sudo reboot                           │"
-echo "  │                                             │"
-echo "  │  3. Tras el reinicio, conectarse al WiFi:   │"
-echo "  │       Red: RelayEtiquetas (sin contraseña)  │"
-echo "  │       URL: http://192.168.4.1               │"
-echo "  │                                             │"
-echo "  │  ⚠ AVISO: este SSH dejará de funcionar     │"
-echo "  │    tras el reboot. Nuevo SSH:               │"
-echo "  │       ssh n1ce@192.168.4.1                  │"
-echo "  │    (conectado al AP RelayEtiquetas)          │"
-echo "  └─────────────────────────────────────────────┘"
-echo ""
-echo "  Para ver logs del servicio:"
-echo "    sudo journalctl -u relay-etiquetas -f"
-echo ""
+echo
+echo "================================================================"
+echo " ✔ Instalación completa"
+echo "   Servicio:  systemctl status relay-etiquetas"
+echo "   Logs:      journalctl -u relay-etiquetas -f"
+echo "   Impresora RJ45: sudo bash $APP_DIR/setup/setup-printer-net.sh"
+echo "   Frontend:  http://192.168.4.1  (conéctate al AP desde el móvil)"
+echo "================================================================"

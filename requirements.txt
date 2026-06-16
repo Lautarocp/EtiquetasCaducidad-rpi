@@ -1,2 +1,7 @@
 flask>=3.0.0
 gunicorn>=21.0.0
+# Solo necesario si backend == "escpos" (USB por vendor/product id):
+# python-escpos>=3.0
+# pyusb>=1.2
+# Solo necesario si backend == "serial" (RS232):
+# pyserial>=3.5

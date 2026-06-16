@@ -1,0 +1,10 @@
+{
+  "backend": "network",
+  "printer_ip": "192.168.34.133",
+  "printer_port": 9100,
+  "usb_device": "/dev/usb/lp0",
+  "usb_vendor_id": "0x0000",
+  "usb_product_id": "0x0000",
+  "serial_port": "/dev/ttyUSB0",
+  "serial_baud": 115200
+}

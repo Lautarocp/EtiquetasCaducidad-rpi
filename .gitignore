@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Config en runtime (se genera desde config.example.json)
+config.json
+
+# Sistema
+.DS_Store
+*.swp

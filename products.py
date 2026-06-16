@@ -1,3 +1,6 @@
+"""Presets de productos con sus días de caducidad por defecto.
+Editar libremente: el frontend los carga vía GET /products."""
+
 PRODUCTS = [
     {"name": "Tortilla",          "days": 3},
     {"name": "Ensalada",          "days": 2},

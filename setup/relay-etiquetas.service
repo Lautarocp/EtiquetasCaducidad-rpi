@@ -1,21 +1,19 @@
 [Unit]
-Description=Relay Etiquetas de Caducidad (Flask/gunicorn)
+Description=Relay Etiquetas de Caducidad (Flask + gunicorn)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=exec
+Type=simple
+User=root
 WorkingDirectory=/home/n1ce/relay-etiquetas
+# Puerto 80 requiere root (o usar setcap / authbind). gunicorn con 2 workers.
 ExecStart=/home/n1ce/relay-etiquetas/venv/bin/gunicorn \
-    --bind 0.0.0.0:80 \
     --workers 2 \
-    --timeout 30 \
-    --access-logfile - \
+    --bind 0.0.0.0:80 \
     app:app
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

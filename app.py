@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """
-Relay de etiquetas de caducidad — Raspberry Pi 3B (Debian Trixie)
+Relay de etiquetas de caducidad — Raspberry Pi (Flask)
+
+La RPi levanta un AP WiFi ("Realyetiquetas"). El móvil se conecta a ese AP y abre
+el frontend en el navegador. Al imprimir, la RPi envía el ticket ESC/POS a la
+impresora térmica — por red (RJ45/WiFi) o por USB, según config.json.
 
 Rutas:
-  GET  /           → sirve static/index.html
-  GET  /products   → lista de productos JSON
-  GET  /config     → configuración actual (IP impresora, puerto)
-  POST /config     → guardar nueva configuración
-  POST /print      → imprimir etiqueta ESC/POS por TCP
+  GET  /          → frontend (static/index.html)
+  GET  /products  → presets de productos (JSON)
+  GET  /config    → configuración actual de impresora
+  POST /config    → guardar configuración (backend, ip, puerto, usb...)
+  POST /print     → imprimir etiqueta
+  GET  /health    → estado del servicio
 """
-import json
 import os
+import json
 import logging
 
 from flask import Flask, request, jsonify, send_from_directory
 
-from escpos_helper import print_label, PrintJob
+from printer import print_label, PrintJob
 from products import PRODUCTS
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -24,8 +29,14 @@ CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 STATIC_DIR  = os.path.join(BASE_DIR, 'static')
 
 DEFAULT_CONFIG = {
-    'printer_ip':   '192.168.168.100',  # IP de la impresora en la red eth0
-    'printer_port': 9100,
+    'backend':        'network',          # network | usb | escpos | serial
+    'printer_ip':     '192.168.34.133',   # impresora SoL801V en la red RJ45
+    'printer_port':   9100,
+    'usb_device':     '/dev/usb/lp0',     # usado si backend == usb
+    'usb_vendor_id':  '0x0000',           # usado si backend == escpos
+    'usb_product_id': '0x0000',
+    'serial_port':    '/dev/ttyUSB0',     # usado si backend == serial
+    'serial_baud':    115200,             # SoL801V: 115200 8N1 RTS/CTS
 }
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -48,10 +59,14 @@ def save_config(cfg: dict) -> None:
 
 
 # ── Rutas ─────────────────────────────────────────────────────────────────────
-
 @app.get('/')
 def index():
     return send_from_directory(STATIC_DIR, 'index.html')
+
+
+@app.get('/health')
+def health():
+    return jsonify({'ok': True, 'service': 'relay-etiquetas'})
 
 
 @app.get('/products')
@@ -71,6 +86,8 @@ def set_config():
         return jsonify({'ok': False, 'msg': 'Body vacío'}), 400
 
     cfg = load_config()
+    if 'backend' in data and data['backend'] in ('network', 'usb', 'escpos', 'serial'):
+        cfg['backend'] = data['backend']
     if 'printer_ip' in data:
         cfg['printer_ip'] = str(data['printer_ip']).strip()
     if 'printer_port' in data:
@@ -78,6 +95,14 @@ def set_config():
             cfg['printer_port'] = int(data['printer_port'])
         except (ValueError, TypeError):
             return jsonify({'ok': False, 'msg': 'Puerto inválido'}), 400
+    if 'serial_baud' in data:
+        try:
+            cfg['serial_baud'] = int(data['serial_baud'])
+        except (ValueError, TypeError):
+            return jsonify({'ok': False, 'msg': 'Baudios inválidos'}), 400
+    for k in ('usb_device', 'usb_vendor_id', 'usb_product_id', 'serial_port'):
+        if k in data:
+            cfg[k] = str(data[k]).strip()
 
     save_config(cfg)
     app.logger.info('Config guardada: %s', cfg)
@@ -104,13 +129,14 @@ def handle_print():
     if not job.test_mode and not job.producto:
         return jsonify({'ok': False, 'msg': 'Producto vacío'}), 400
 
-    app.logger.info('Imprimiendo: %s (prueba=%s, copias=%d)',
-                    job.producto or 'TEST', job.test_mode, job.copies)
+    app.logger.info('Imprimiendo: %s (prueba=%s, copias=%d, backend=%s)',
+                    job.producto or 'TEST', job.test_mode, job.copies, cfg['backend'])
 
-    result = print_label(job, cfg['printer_ip'], int(cfg['printer_port']))
+    result = print_label(job, cfg)
     status = 200 if result['ok'] else 503
     return jsonify(result), status
 
 
 if __name__ == '__main__':
+    # Producción: gunicorn (ver setup/relay-etiquetas.service)
     app.run(host='0.0.0.0', port=80, debug=False)

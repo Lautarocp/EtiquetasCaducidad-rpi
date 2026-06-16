@@ -32,6 +32,7 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 .cfg-row>div:first-child{flex:1}
 .cfg-row>div:last-child{width:90px}
 #cfg-status{font-size:.75em;margin-top:4px;color:#666;min-height:16px}
+.hide{display:none}
 </style>
 </head>
 <body>
@@ -88,17 +89,59 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 
 <div class="card">
   <h2>Impresora <button class="b-cfg" onclick="toggleCfg()">&#9881; Config</button></h2>
-  <div id="cfg-panel" style="display:none">
-    <div class="cfg-row">
-      <div>
-        <label>IP de la impresora</label>
-        <input type="text" id="cfg_ip" placeholder="192.168.168.100">
-      </div>
-      <div>
-        <label>Puerto</label>
-        <input type="number" id="cfg_port" value="9100" min="1" max="65535">
+  <div id="cfg-panel" class="hide">
+    <label>Conexi&#xF3;n</label>
+    <select id="cfg_backend" onchange="onBackend()">
+      <option value="network">Red (RJ45 / WiFi, TCP 9100)</option>
+      <option value="usb">USB (/dev/usb/lp0)</option>
+      <option value="escpos">USB (python-escpos, vendor/product id)</option>
+      <option value="serial">Serie RS232 (115200 8N1 RTS/CTS)</option>
+    </select>
+
+    <div id="cfg-net">
+      <div class="cfg-row" style="margin-top:7px">
+        <div>
+          <label>IP de la impresora</label>
+          <input type="text" id="cfg_ip" placeholder="192.168.34.133">
+        </div>
+        <div>
+          <label>Puerto</label>
+          <input type="number" id="cfg_port" value="9100" min="1" max="65535">
+        </div>
       </div>
     </div>
+
+    <div id="cfg-usb" class="hide">
+      <label>Dispositivo USB</label>
+      <input type="text" id="cfg_usb_device" placeholder="/dev/usb/lp0">
+    </div>
+
+    <div id="cfg-escpos" class="hide">
+      <div class="row" style="margin-top:7px">
+        <div>
+          <label>Vendor ID</label>
+          <input type="text" id="cfg_vid" placeholder="0x0416">
+        </div>
+        <div>
+          <label>Product ID</label>
+          <input type="text" id="cfg_pid" placeholder="0x5011">
+        </div>
+      </div>
+    </div>
+
+    <div id="cfg-serial" class="hide">
+      <div class="cfg-row" style="margin-top:7px">
+        <div>
+          <label>Puerto serie</label>
+          <input type="text" id="cfg_serial_port" placeholder="/dev/ttyUSB0">
+        </div>
+        <div>
+          <label>Baudios</label>
+          <input type="number" id="cfg_serial_baud" value="115200">
+        </div>
+      </div>
+    </div>
+
     <button class="btn b-sm b-save" onclick="saveCfg()" style="margin-top:8px">Guardar</button>
     <div id="cfg-status"></div>
   </div>
@@ -121,7 +164,6 @@ fetch('/products')
       o.textContent = p.name + ' (' + p.days + 'd)';
       s.appendChild(o);
     });
-    // Fechas por defecto: hoy
     var t = iso(new Date());
     document.getElementById('realizacion').value = t;
     document.getElementById('envasado').value = t;
@@ -132,22 +174,38 @@ fetch('/products')
 fetch('/config')
   .then(function(r){return r.json()})
   .then(function(c){
+    document.getElementById('cfg_backend').value = c.backend || 'network';
     document.getElementById('cfg_ip').value = c.printer_ip || '';
     document.getElementById('cfg_port').value = c.printer_port || 9100;
-    document.getElementById('cfg-summary').textContent =
-      c.printer_ip + ':' + c.printer_port;
+    document.getElementById('cfg_usb_device').value = c.usb_device || '/dev/usb/lp0';
+    document.getElementById('cfg_vid').value = c.usb_vendor_id || '';
+    document.getElementById('cfg_pid').value = c.usb_product_id || '';
+    document.getElementById('cfg_serial_port').value = c.serial_port || '/dev/ttyUSB0';
+    document.getElementById('cfg_serial_baud').value = c.serial_baud || 115200;
+    onBackend();
+    updSummary(c);
   });
 
+function updSummary(c){
+  var s = c.backend === 'network' ? ('Red ' + c.printer_ip + ':' + c.printer_port)
+        : c.backend === 'usb'     ? ('USB ' + c.usb_device)
+        : c.backend === 'serial'  ? ('Serie ' + c.serial_port + '@' + c.serial_baud)
+        :                           ('USB escpos ' + c.usb_vendor_id + ':' + c.usb_product_id);
+  document.getElementById('cfg-summary').textContent = s;
+}
+
+function onBackend(){
+  var b = document.getElementById('cfg_backend').value;
+  document.getElementById('cfg-net').classList.toggle('hide', b !== 'network');
+  document.getElementById('cfg-usb').classList.toggle('hide', b !== 'usb');
+  document.getElementById('cfg-escpos').classList.toggle('hide', b !== 'escpos');
+  document.getElementById('cfg-serial').classList.toggle('hide', b !== 'serial');
+}
+
 // ── Helpers de fecha ──────────────────────────────────────────────────────────
-function iso(d){
-  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
-}
+function iso(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
 function pad(n){return n<10?'0'+n:n}
-function fmt(v){
-  if(!v) return '';
-  var p = v.split('-');
-  return p[2]+'/'+p[1]+'/'+p[0];
-}
+function fmt(v){if(!v) return '';var p=v.split('-');return p[2]+'/'+p[1]+'/'+p[0]}
 
 // ── Presets ───────────────────────────────────────────────────────────────────
 function onPreset(){
@@ -239,25 +297,37 @@ function send(test){
 // ── Config impresora ──────────────────────────────────────────────────────────
 function toggleCfg(){
   var p = document.getElementById('cfg-panel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  p.classList.toggle('hide');
 }
 
 function saveCfg(){
-  var ip   = document.getElementById('cfg_ip').value.trim();
-  var port = parseInt(document.getElementById('cfg_port').value);
-  var st   = document.getElementById('cfg-status');
-  if(!ip || !port){st.textContent = 'IP o puerto inválidos';return}
+  var backend = document.getElementById('cfg_backend').value;
+  var st = document.getElementById('cfg-status');
+  var body = {backend: backend};
+  if(backend === 'network'){
+    body.printer_ip = document.getElementById('cfg_ip').value.trim();
+    body.printer_port = parseInt(document.getElementById('cfg_port').value);
+    if(!body.printer_ip || !body.printer_port){st.textContent='IP o puerto inválidos';return}
+  } else if(backend === 'usb'){
+    body.usb_device = document.getElementById('cfg_usb_device').value.trim();
+  } else if(backend === 'serial'){
+    body.serial_port = document.getElementById('cfg_serial_port').value.trim();
+    body.serial_baud = parseInt(document.getElementById('cfg_serial_baud').value) || 115200;
+  } else {
+    body.usb_vendor_id = document.getElementById('cfg_vid').value.trim();
+    body.usb_product_id = document.getElementById('cfg_pid').value.trim();
+  }
   st.textContent = 'Guardando...';
   fetch('/config', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({printer_ip: ip, printer_port: port})
+    body: JSON.stringify(body)
   })
   .then(function(r){return r.json()})
   .then(function(r){
     if(r.ok){
       st.textContent = '✔ Guardado';
-      document.getElementById('cfg-summary').textContent = ip + ':' + port;
+      updSummary(r.config);
       setTimeout(function(){st.textContent=''},2000);
     } else {
       st.textContent = 'Error: ' + (r.msg||'?');
