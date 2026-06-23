@@ -7,6 +7,9 @@ venv/
 # Config en runtime (se genera desde config.example.json)
 config.json
 
+# Presets editados por el usuario (semilla en products.py)
+products.json
+
 # Sistema
 .DS_Store
 *.swp

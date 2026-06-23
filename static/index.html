@@ -20,7 +20,7 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 .btn:active{filter:brightness(.88)}
 .b-imp{background:#1565C0;color:#fff}
 .b-test{background:#E65100;color:#fff}
-.b-sm{padding:6px 14px;width:auto;font-size:.85em;border-radius:4px}
+.b-sm{padding:8px 14px;width:auto;font-size:.85em;border-radius:4px}
 .b-save{background:#2e7d32;color:#fff}
 .b-cfg{background:none;border:1px solid #ccc;color:#666;font-size:.75em;cursor:pointer;border-radius:4px;padding:3px 8px}
 #preview{font-family:'Courier New',monospace;font-size:.75em;white-space:pre;padding:10px 12px;background:#f9f9f9;border:1px solid #e0e0e0;border-radius:5px;min-height:88px;color:#333;line-height:1.55}
@@ -33,6 +33,17 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 .cfg-row>div:last-child{width:90px}
 #cfg-status{font-size:.75em;margin-top:4px;color:#666;min-height:16px}
 .hide{display:none}
+/* Conmutador de conexión USB / Red */
+.seg{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.seg button{flex:1;min-width:64px;padding:11px 6px;border:1px solid #ccc;border-radius:6px;background:#fafafa;font-size:.85em;font-weight:700;color:#555;cursor:pointer}
+.seg button.on{background:#1565C0;color:#fff;border-color:#1565C0}
+/* Lista de presets */
+.preset-row{display:flex;align-items:center;gap:6px;padding:9px 4px;border-bottom:1px solid #f0f0f0}
+.preset-name{flex:1;font-size:.92em;color:#333;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b-icon{flex:0 0 auto;width:38px;padding:8px 0;border:1px solid #ccc;background:#fafafa;border-radius:5px;font-size:1em;cursor:pointer}
+.b-icon.b-del{border-color:#ef9a9a;color:#b71c1c}
+.preset-edit{padding:10px;background:#f5f7fa;border:1px solid #d7dde6;border-radius:6px;margin:6px 0}
+.preset-edit input,.preset-edit select{background:#fff}
 </style>
 </head>
 <body>
@@ -88,15 +99,26 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 <button class="btn b-test" onclick="send(true)">&#9881; Imprimir prueba</button>
 
 <div class="card">
+  <h2>Mis presets <button class="b-cfg" onclick="togglePresets()">&#9998; Editar</button></h2>
+  <div id="presets-panel" class="hide">
+    <div id="presets-list"></div>
+    <button class="btn b-sm b-save" style="margin-top:8px" onclick="newPreset()">&#10133; Nuevo preset</button>
+    <div id="presets-status" style="font-size:.78em;margin-top:6px;min-height:16px;color:#666"></div>
+  </div>
+  <div id="presets-summary" style="font-size:.82em;color:#777;margin-top:2px">Cargando...</div>
+</div>
+
+<div class="card">
   <h2>Impresora <button class="b-cfg" onclick="toggleCfg()">&#9881; Config</button></h2>
   <div id="cfg-panel" class="hide">
-    <label>Conexi&#xF3;n</label>
-    <select id="cfg_backend" onchange="onBackend()">
-      <option value="network">Red (RJ45 / WiFi, TCP 9100)</option>
-      <option value="usb">USB (/dev/usb/lp0)</option>
-      <option value="escpos">USB (python-escpos, vendor/product id)</option>
-      <option value="serial">Serie RS232 (115200 8N1 RTS/CTS)</option>
-    </select>
+    <label>C&#xF3;mo se conecta la impresora</label>
+    <div class="seg" id="backend-seg">
+      <button type="button" data-b="usb"     onclick="setBackend('usb')">USB</button>
+      <button type="button" data-b="network" onclick="setBackend('network')">Red (LAN)</button>
+      <button type="button" data-b="escpos"  onclick="setBackend('escpos')">USB id</button>
+      <button type="button" data-b="serial"  onclick="setBackend('serial')">Serie</button>
+    </div>
+    <input type="hidden" id="cfg_backend" value="network">
 
     <div id="cfg-net">
       <div class="cfg-row" style="margin-top:7px">
@@ -165,20 +187,15 @@ input:focus,select:focus{outline:none;border-color:#3949ab;background:#fff}
 
 <script>
 var PRODUCTS = [];
+var editIndex = null;  // null = ninguno · índice = editando esa fila · 'new' = creando
 
 // ── Cargar productos ──────────────────────────────────────────────────────────
 fetch('/products')
   .then(function(r){return r.json()})
   .then(function(list){
-    PRODUCTS = list;
-    var s = document.getElementById('preset');
-    s.innerHTML = '<option value="">-- Seleccionar preset --</option>';
-    list.forEach(function(p,i){
-      var o = document.createElement('option');
-      o.value = i;
-      o.textContent = p.name + ' (' + p.days + 'd)';
-      s.appendChild(o);
-    });
+    PRODUCTS = list.map(normPreset);
+    renderPresetDropdown();
+    renderPresetsSummary();
     var t = iso(new Date());
     document.getElementById('realizacion').value = t;
     document.getElementById('envasado').value = t;
@@ -189,7 +206,6 @@ fetch('/products')
 fetch('/config')
   .then(function(r){return r.json()})
   .then(function(c){
-    document.getElementById('cfg_backend').value = c.backend || 'network';
     document.getElementById('cfg_ip').value = c.printer_ip || '';
     document.getElementById('cfg_port').value = c.printer_port || 9100;
     document.getElementById('cfg_usb_device').value = c.usb_device || '/dev/usb/lp0';
@@ -197,7 +213,7 @@ fetch('/config')
     document.getElementById('cfg_pid').value = c.usb_product_id || '';
     document.getElementById('cfg_serial_port').value = c.serial_port || '/dev/ttyUSB0';
     document.getElementById('cfg_serial_baud').value = c.serial_baud || 115200;
-    onBackend();
+    setBackend(c.backend || 'network');
     updSummary(c);
   });
 
@@ -205,12 +221,16 @@ function updSummary(c){
   var s = c.backend === 'network' ? ('Red ' + c.printer_ip + ':' + c.printer_port)
         : c.backend === 'usb'     ? ('USB ' + c.usb_device)
         : c.backend === 'serial'  ? ('Serie ' + c.serial_port + '@' + c.serial_baud)
-        :                           ('USB escpos ' + c.usb_vendor_id + ':' + c.usb_product_id);
+        :                           ('USB id ' + c.usb_vendor_id + ':' + c.usb_product_id);
   document.getElementById('cfg-summary').textContent = s;
 }
 
-function onBackend(){
-  var b = document.getElementById('cfg_backend').value;
+// ── Conmutador de conexión (USB / Red / ...) ──────────────────────────────────
+function setBackend(b){
+  document.getElementById('cfg_backend').value = b;
+  var btns = document.querySelectorAll('#backend-seg button');
+  for(var i=0;i<btns.length;i++)
+    btns[i].classList.toggle('on', btns[i].getAttribute('data-b') === b);
   document.getElementById('cfg-net').classList.toggle('hide', b !== 'network');
   document.getElementById('cfg-usb').classList.toggle('hide', b !== 'usb');
   document.getElementById('cfg-escpos').classList.toggle('hide', b !== 'escpos');
@@ -250,7 +270,28 @@ function iso(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate
 function pad(n){return n<10?'0'+n:n}
 function fmt(v){if(!v) return '';var p=v.split('-');return p[2]+'/'+p[1]+'/'+p[0]}
 
-// ── Presets ───────────────────────────────────────────────────────────────────
+// Suma value días o meses a una fecha ISO (YYYY-MM-DD). setMonth ajusta el
+// calendario solo (15 ene + 6 meses = 15 jul), sin contar días a mano.
+function addDuration(dateStr, value, unit){
+  var d = new Date(dateStr + 'T00:00:00');
+  if(unit === 'meses') d.setMonth(d.getMonth() + value);
+  else d.setDate(d.getDate() + value);
+  return d;
+}
+
+// ── Presets: normalización y etiquetas ────────────────────────────────────────
+function normPreset(p){
+  // Compatibilidad con el formato antiguo {name, days}
+  if(p.value === undefined && p.days !== undefined)
+    return {name:p.name, value:p.days, unit:'dias'};
+  return {name:p.name, value:p.value, unit:(p.unit === 'meses' ? 'meses' : 'dias')};
+}
+function unitLabel(p){
+  if(p.unit === 'meses') return p.value === 1 ? 'mes' : 'meses';
+  return p.value === 1 ? 'día' : 'días';
+}
+
+// ── Selección de preset en el formulario ──────────────────────────────────────
 function onPreset(){
   var i = document.getElementById('preset').value;
   if(i === '') return;
@@ -262,13 +303,135 @@ function onReal(){
   var r = document.getElementById('realizacion').value;
   var i = document.getElementById('preset').value;
   if(r && i !== ''){
-    var d = new Date(r + 'T00:00:00');
-    d.setDate(d.getDate() + PRODUCTS[+i].days);
-    document.getElementById('caducidad').value = iso(d);
+    var p = PRODUCTS[+i];
+    document.getElementById('caducidad').value = iso(addDuration(r, p.value, p.unit));
   }
   if(!document.getElementById('envasado').value)
     document.getElementById('envasado').value = document.getElementById('realizacion').value;
   upd();
+}
+
+// ── Gestión de presets (crear / editar / borrar, sin modales) ─────────────────
+function renderPresetDropdown(){
+  var s = document.getElementById('preset');
+  s.innerHTML = '<option value="">-- Seleccionar preset --</option>';
+  PRODUCTS.forEach(function(p,i){
+    var o = document.createElement('option');
+    o.value = i;
+    o.textContent = p.name + ' (' + p.value + (p.unit === 'meses' ? 'm' : 'd') + ')';
+    s.appendChild(o);
+  });
+}
+
+function renderPresetsSummary(){
+  document.getElementById('presets-summary').textContent =
+    PRODUCTS.length + (PRODUCTS.length === 1 ? ' preset' : ' presets');
+}
+
+function togglePresets(){
+  var p = document.getElementById('presets-panel');
+  p.classList.toggle('hide');
+  if(!p.classList.contains('hide')) renderPresetsList();
+}
+
+function renderPresetsList(){
+  var c = document.getElementById('presets-list');
+  c.innerHTML = '';
+  PRODUCTS.forEach(function(p, i){
+    if(editIndex === i){ c.appendChild(presetEditor(p, i)); return; }
+    var row = document.createElement('div');
+    row.className = 'preset-row';
+    var lbl = document.createElement('span');
+    lbl.className = 'preset-name';
+    lbl.textContent = p.name + ' · ' + p.value + ' ' + unitLabel(p);
+    var bedit = document.createElement('button');
+    bedit.className = 'b-icon'; bedit.innerHTML = '&#9998;';
+    bedit.onclick = function(){ editIndex = i; renderPresetsList(); };
+    var bdel = document.createElement('button');
+    bdel.className = 'b-icon b-del'; bdel.innerHTML = '&#128465;';
+    bdel.onclick = function(){ deletePreset(i); };
+    row.appendChild(lbl); row.appendChild(bedit); row.appendChild(bdel);
+    c.appendChild(row);
+  });
+  if(editIndex === 'new')
+    c.appendChild(presetEditor({name:'', value:3, unit:'dias'}, 'new'));
+}
+
+function presetEditor(p, idx){
+  var box = document.createElement('div');
+  box.className = 'preset-edit';
+  box.innerHTML =
+    '<input type="text" class="pe-name" placeholder="Nombre del producto" autocomplete="off">' +
+    '<div class="row" style="margin-top:6px">' +
+      '<div style="flex:0 0 84px"><input type="number" class="pe-value" min="1" max="999"></div>' +
+      '<div><select class="pe-unit"><option value="dias">días</option><option value="meses">meses</option></select></div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:8px">' +
+      '<button class="btn b-sm b-save pe-ok" style="flex:1;margin:0">Guardar</button>' +
+      '<button class="btn b-sm pe-cancel" style="flex:1;margin:0;background:none;border:1px solid #ccc;color:#666">Cancelar</button>' +
+    '</div>';
+  box.querySelector('.pe-name').value = p.name || '';
+  box.querySelector('.pe-value').value = p.value || 1;
+  box.querySelector('.pe-unit').value = p.unit || 'dias';
+  box.querySelector('.pe-ok').onclick = function(){ savePreset(idx, box); };
+  box.querySelector('.pe-cancel').onclick = function(){ editIndex = null; renderPresetsList(); };
+  return box;
+}
+
+function newPreset(){
+  editIndex = 'new';
+  if(document.getElementById('presets-panel').classList.contains('hide'))
+    document.getElementById('presets-panel').classList.remove('hide');
+  renderPresetsList();
+}
+
+function savePreset(idx, box){
+  var name  = box.querySelector('.pe-name').value.trim();
+  var value = parseInt(box.querySelector('.pe-value').value);
+  var unit  = box.querySelector('.pe-unit').value;
+  if(!name){ presetStatus('El nombre es obligatorio', true); return; }
+  if(!value || value < 1){ presetStatus('Pon un número de 1 o más', true); return; }
+  var preset = {name:name, value:value, unit:unit};
+  if(idx === 'new') PRODUCTS.push(preset);
+  else PRODUCTS[idx] = preset;
+  editIndex = null;
+  persistPresets();
+}
+
+function deletePreset(i){
+  if(!confirm('¿Borrar el preset "' + PRODUCTS[i].name + '"?')) return;
+  PRODUCTS.splice(i, 1);
+  if(editIndex === i) editIndex = null;
+  persistPresets();
+}
+
+function presetStatus(msg, isErr){
+  var st = document.getElementById('presets-status');
+  st.style.color = isErr ? '#b71c1c' : '#1b5e20';
+  st.textContent = msg;
+}
+
+function persistPresets(){
+  presetStatus('Guardando...', false);
+  fetch('/products', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(PRODUCTS)
+  })
+  .then(function(r){return r.json()})
+  .then(function(r){
+    if(r.ok){
+      PRODUCTS = r.products.map(normPreset);
+      presetStatus('✔ Guardado', false);
+      setTimeout(function(){presetStatus('', false)}, 1800);
+    } else {
+      presetStatus('Error: ' + (r.msg || '?'), true);
+    }
+    renderPresetsList();
+    renderPresetDropdown();
+    renderPresetsSummary();
+  })
+  .catch(function(){ presetStatus('✘ Error de red', true); });
 }
 
 // ── Preview ───────────────────────────────────────────────────────────────────

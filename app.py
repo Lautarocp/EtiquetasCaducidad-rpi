@@ -9,6 +9,7 @@ impresora térmica — por red (RJ45/WiFi) o por USB, según config.json.
 Rutas:
   GET  /          → frontend (static/index.html)
   GET  /products  → presets de productos (JSON)
+  POST /products  → guardar la lista completa de presets
   GET  /config    → configuración actual de impresora
   POST /config    → guardar configuración (backend, ip, puerto, usb...)
   POST /print     → imprimir etiqueta
@@ -21,13 +22,14 @@ import logging
 from flask import Flask, request, jsonify, send_from_directory
 
 from printer import print_label, PrintJob
-from products import PRODUCTS
+from products import DEFAULT_PRODUCTS
 import netcfg
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
-STATIC_DIR  = os.path.join(BASE_DIR, 'static')
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE   = os.path.join(BASE_DIR, 'config.json')
+PRODUCTS_FILE = os.path.join(BASE_DIR, 'products.json')
+STATIC_DIR    = os.path.join(BASE_DIR, 'static')
 
 DEFAULT_CONFIG = {
     'backend':        'network',          # network | usb | escpos | serial
@@ -61,6 +63,46 @@ def save_config(cfg: dict) -> None:
         json.dump(cfg, f, indent=2)
 
 
+def _normalize_preset(p: dict) -> dict | None:
+    """Valida y normaliza un preset. Acepta el formato antiguo ({name, days}).
+    Devuelve {name, value, unit} o None si es inválido."""
+    if not isinstance(p, dict):
+        return None
+    name = str(p.get('name', '')).strip()
+    if not name:
+        return None
+    # Compatibilidad con el formato antiguo: {name, days}
+    if 'value' not in p and 'days' in p:
+        value, unit = p.get('days'), 'dias'
+    else:
+        value, unit = p.get('value'), p.get('unit', 'dias')
+    try:
+        value = int(value)
+    except (ValueError, TypeError):
+        return None
+    if value < 1:
+        return None
+    if unit not in ('dias', 'meses'):
+        unit = 'dias'
+    return {'name': name[:40], 'value': value, 'unit': unit}
+
+
+def load_products() -> list:
+    """Carga products.json; si no existe, devuelve la semilla por defecto."""
+    try:
+        with open(PRODUCTS_FILE) as f:
+            raw = json.load(f)
+        presets = [n for p in raw if (n := _normalize_preset(p))]
+        return presets if presets else [dict(p) for p in DEFAULT_PRODUCTS]
+    except Exception:
+        return [dict(p) for p in DEFAULT_PRODUCTS]
+
+
+def save_products(presets: list) -> None:
+    with open(PRODUCTS_FILE, 'w') as f:
+        json.dump(presets, f, ensure_ascii=False, indent=2)
+
+
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 @app.get('/')
 def index():
@@ -74,7 +116,21 @@ def health():
 
 @app.get('/products')
 def get_products():
-    return jsonify(PRODUCTS)
+    return jsonify(load_products())
+
+
+@app.post('/products')
+def set_products():
+    """Guarda la lista completa de presets. El frontend gestiona el array y lo
+    envía entero (crear/editar/borrar). Cada preset: {name, value, unit}."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, list):
+        return jsonify({'ok': False, 'msg': 'Se esperaba una lista de presets'}), 400
+
+    presets = [n for p in data if (n := _normalize_preset(p))]
+    save_products(presets)
+    app.logger.info('Presets guardados: %d', len(presets))
+    return jsonify({'ok': True, 'products': presets})
 
 
 @app.get('/config')
